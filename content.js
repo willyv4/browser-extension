@@ -1,5 +1,3 @@
-import { APIKEY, ASSISTANT_ID } from "./config.js";
-
 const TEST_MESSAGE = `Hi Faith,
 After further testing, I’ve confirmed that this issue isn’t limited to your web application but occurs in others as well, which suggests it’s likely a bug.
 I’ve submitted a bug ticket and notified our development team about the issue.
@@ -7,9 +5,11 @@ As I work with them and receive updates, I’ll be sure to keep you in the loop.
 Thank you for your patience as we work through this!
 Best,`;
 
+let POST_EDITOR_ELEMENT = null;
+
 class OpenAI {
-  constructor(apiKey) {
-    this.apiKey = apiKey;
+  constructor() {
+    this.apiKey =""
     this.baseUrl = "https://api.openai.com/v1";
     this.headers = {
       "Content-Type": "application/json",
@@ -48,13 +48,16 @@ class OpenAI {
     return await response.json();
   }
 
-  async createAndStreamRun(threadId) {
+  async createAndStreamRun(threadId, element) {
     const url = `${this.baseUrl}/threads/${threadId}/runs`;
 
     const response = await fetch(url, {
       method: "POST",
       headers: { ...this.headers, Accept: "text/event-stream" },
-      body: JSON.stringify({ assistant_id: ASSISTANT_ID, stream: true }),
+      body: JSON.stringify({
+        assistant_id: "",
+        stream: true,
+      }),
     });
 
     if (!response.ok) {
@@ -62,17 +65,120 @@ class OpenAI {
       return;
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder("utf-8");
+    const today = new Date();
+const month = today.getMonth() + 1; // getMonth() returns 0-based month
+const day = today.getDate();
+const formattedDate = `<p><strong>[${month}/${day}]</strong></p>`;
 
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
+element.innerHTML = formattedDate; // Set the initial date at the top
 
-      const chunk = decoder.decode(value, { stream: true });
-      console.log("SSE chunk received:", chunk);
-      // Parse and handle each SSE event chunk as needed
+let accumulatedText = ""; // To store the dynamic text content
+const reader = response.body.getReader();
+const decoder = new TextDecoder("utf-8");
+
+while (true) {
+  const { value, done } = await reader.read();
+  if (done) break;
+
+  const chunk = decoder.decode(value, { stream: true });
+  console.log({ chunk });
+
+  const events = chunk.split("\n\n");
+
+  for (const event of events) {
+    if (event.startsWith("event: thread.message.delta")) {
+      const dataIndex = event.indexOf("data: ");
+      if (dataIndex !== -1) {
+        const jsonData = event.substring(dataIndex + 6);
+        try {
+          const parsedData = JSON.parse(jsonData);
+          const content = parsedData.delta.content;
+          for (const item of content) {
+            if (item.type !== "text") continue;
+            accumulatedText += item.text.value;
+            // Ensure date always stays above the dynamic content
+            element.innerHTML = formattedDate + accumulatedText.split("\n").map((txt) => `<p>${txt}</p>`).join('');
+          }
+        } catch (error) {
+          console.error("Failed to parse JSON data:", error);
+        }
+      }
     }
+  }
+}
+
+
+
+    // const today = new Date();
+    // const month = today.getMonth() + 1; // getMonth() returns 0-based month
+    // const day = today.getDate();
+    // const formattedDate = `<p><strong>[${month}/${day}]</strong></p>`;
+    // element.innerHTML = formattedDate
+    // let accumulatedText = "";
+    // const reader = response.body.getReader();
+    // const decoder = new TextDecoder("utf-8");
+
+    // while (true) {
+    //   const { value, done } = await reader.read();
+    //   if (done) break;
+
+    //   const chunk = decoder.decode(value, { stream: true });
+    //   console.log({ chunk });
+
+    //   const events = chunk.split("\n\n");
+
+    //   for (const event of events) {
+    //     if (event.startsWith("event: thread.message.delta")) {
+    //       const dataIndex = event.indexOf("data: ");
+    //       if (dataIndex !== -1) {
+    //         const jsonData = event.substring(dataIndex + 6);
+    //         try {
+    //           const parsedData = JSON.parse(jsonData);
+    //           const content = parsedData.delta.content;
+    //           for (const item of content) {
+    //             if (item.type !== "text") continue;
+    //             accumulatedText += item.text.value;;
+    //             element.innerText = accumulatedText;
+    //           }
+    //         } catch (error) {
+    //           console.error("Failed to parse JSON data:", error);
+    //         }
+    //       }
+    //     }
+    //   }
+    // }
+
+    console.log("Final accumulated text:", { accumulatedText });
+    // const reader = response.body.getReader();
+    // const decoder = new TextDecoder("utf-8");
+
+    // let accumulatedText = "Hello World,";
+
+    // while (true) {`
+    //   const { value, done } = await reader.read();
+    //   if (done) break;
+
+    //   const chunk = decoder.decode(value, { stream: true });
+    //   console.log({ chunk });
+
+    //   if (chunk.includes("textDelta")) {
+
+    //   if (element) {
+    //     element.textContent = accumulatedText;
+    //   }
+
+    //   // Parse and handle each SSE event chunk as needed
+    // }
+    // console.log("Final accumulated text:", accumulatedText);
+    // while (true) {
+    //   const { value, done } = await reader.read();
+    //   if (done) break;
+
+    //   const chunk = decoder.decode(value, { stream: true });
+    //   const text = chunk.data.value;
+    //   console.log("SSE chunk received:", { text });
+    //   // Parse and handle each SSE event chunk as needed
+    // }
 
     // Open the EventSource connection for SSE
     // const eventSource = new EventSource(url);
@@ -117,8 +223,8 @@ class OpenAI {
   }
 }
 
-const openAI = new OpenAI(APIKEY);
-const sendTestMessage = async () => {
+const openAI = new OpenAI();
+const sendTestMessage = async (element) => {
   const thread = await openAI.createThread();
   console.log({ thread });
   const threadId = thread.id;
@@ -129,7 +235,7 @@ const sendTestMessage = async () => {
   }
 
   await openAI.addMessageToThread(threadId, TEST_MESSAGE);
-  await openAI.createAndStreamRun(threadId);
+  await openAI.createAndStreamRun(threadId, element);
 };
 
 const composeBtnSelector = '.slds-button--brand[title="Compose"]';
@@ -145,15 +251,8 @@ const postTabSelector =
 const postTab = () => document.querySelector(postTabSelector);
 
 const postEditorBrSelector =
-  "#outerContainer > div.slds-form-element.lightningInputRichText.forceChatterMessageBodyInputRichTextEditor > div > div.slds-rich-text-editor__textarea.slds-grid.ql-container > div.ql-editor.ql-blank.slds-rich-text-area__content.slds-text-color_weak.slds-grow > p > br";
+  "#outerContainer > div.slds-form-element.lightningInputRichText.forceChatterMessageBodyInputRichTextEditor > div > div.slds-rich-text-editor__textarea.slds-grid.ql-container > div.ql-editor.ql-blank.slds-rich-text-area__content.slds-text-color_weak.slds-grow";
 const postEditorBr = () => document.querySelector(postEditorBrSelector);
-
-const insertTextIntoPostEditor = (text) => {
-  const editor = postEditorBr()?.parentElement;
-  if (editor) {
-    editor.textContent = text;
-  }
-};
 
 const currentUrl = window.location.href;
 const caseUrlPattern = /lightning\/r\/Case\/[a-zA-Z0-9]+\/view/;
@@ -189,6 +288,7 @@ const waitForSendBtn = async (sendBtn) => {
 };
 
 const examinePage = async () => {
+  console.log({ isCaseUrl });
   if (!isCaseUrl) return;
 
   const composeBtn = await getElement(composeButton);
@@ -203,6 +303,7 @@ const examinePage = async () => {
   if (!clickedComposeBtn) return;
 
   const postTabLink = await getElement(postTab);
+  console.log({ postTabLink });
   if (!postTabLink) {
     console.log("Post tab not found");
     return;
@@ -215,12 +316,7 @@ const examinePage = async () => {
     return;
   }
 
-  const editor = postEditorBrResult?.parentElement;
-  if (editor) {
-    editor.textContent = "Hello World";
-  }
-
-  await sendTestMessage();
+  await sendTestMessage(postEditorBrResult);
 
   // setTimeout(() => {
   //   insertTextIntoPostEditor("hi test");
